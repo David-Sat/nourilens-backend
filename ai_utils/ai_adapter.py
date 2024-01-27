@@ -1,10 +1,12 @@
 import json
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.schema.messages import HumanMessage
-from langchain.prompts import ChatPromptTemplate
 from langchain.schema import StrOutputParser
-from langchain.prompts import ChatPromptTemplate, FewShotChatMessagePromptTemplate
+from langchain.prompts import ChatPromptTemplate, FewShotChatMessagePromptTemplate, PromptTemplate
 from ai_utils.config_loader import load_few_shot_examples
+from pydantic import ValidationError, BaseModel, Field
+from langchain.output_parsers import PydanticOutputParser
+from typing import List
 
 
 example_prompt = ChatPromptTemplate.from_messages(
@@ -13,6 +15,25 @@ example_prompt = ChatPromptTemplate.from_messages(
             ("ai", "{output}"),
         ]
     )
+
+
+# Pydantic models for data validation
+class ReceiptItem(BaseModel):
+    itemName: str = Field(description="Name of the item")
+    price: float = Field(description="Price of the item")
+
+class Receipt(BaseModel):
+    receiptItems: List[ReceiptItem] = Field(description="List of receipt items")
+
+class EnrichedReceiptItem(BaseModel):
+    itemName: str = Field(description="Name of the item")
+    price: float = Field(description="Price of the item")
+    nutritionalValue: int = Field(0, description="Nutritional value of the item from 0 to 10")
+
+class EnrichedReceipt(BaseModel):
+    receiptItems: List[EnrichedReceiptItem] = Field(description="List of receipt items with nutritional values")
+
+
 
 def process_image(img):
     vision_model = ChatGoogleGenerativeAI(model="gemini-pro-vision", stream=True, convert_system_message_to_human=True)
@@ -37,7 +58,6 @@ def process_image(img):
 
 def filter_list(raw_text: str) -> str:
     text_model = ChatGoogleGenerativeAI(model="gemini-pro", convert_system_message_to_human=True)
-
     result = text_model.invoke("Remove all non food items and their prices from the list. DO NOT ADD ANY ADDITIONAL TEXT. \n" + raw_text)
 
     return result.content
@@ -45,35 +65,41 @@ def filter_list(raw_text: str) -> str:
 def create_raw_json(raw_text: str) -> str:
     text_model = ChatGoogleGenerativeAI(model="gemini-pro", convert_system_message_to_human=True)
 
+    # Potentially use a few-shot prompt to help the model understand the task
     few_shot_examples = load_few_shot_examples('configs/few_shot_examples.json')
-
     few_shot_prompt = FewShotChatMessagePromptTemplate(
         example_prompt=example_prompt,
         examples=few_shot_examples,
     )
 
-    prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", "Convert the provided lists to JSON. Only return JSON. DO NOT ADD ANY ADDITIONAL TEXT."),
-                few_shot_prompt,
-                ("human", raw_text)
-            ] 
-        )
-    
-    chain = (
-        prompt
-        | text_model
-        | StrOutputParser()
+    parser = PydanticOutputParser(pydantic_object=Receipt)
+
+    prompt = PromptTemplate(
+        template="Convert the provided list to JSON.\n{format_instructions}\n{query}\n",
+        input_variables=["query"],
+        partial_variables={"format_instructions": parser.get_format_instructions()},
     )
 
-    output = chain.invoke({})
-    return output
+    chain = prompt | text_model | parser
+
+    try:
+        validated_data = chain.invoke({"query": raw_text})
+        return json.dumps(validated_data.dict())
+    except Exception as e:
+        return f"Error: {e}"
 
 
 
-def enrich_json(data_raw_json: str) -> str:
+def add_nutritional_data(data_raw_json: str) -> str:
     text_model = ChatGoogleGenerativeAI(model="gemini-pro", convert_system_message_to_human=True)
 
-    result = text_model.invoke("Enrich each item in the JSON with a nutritional value from 0 to 10. DO NOT ADD ANY ADDITIONAL TEXT. \n" + data_raw_json)
+    result = text_model.invoke("Enrich each item in the JSON with a nutritional value from 0 to 10.\n" + data_raw_json)
 
-    return result.content
+    try:
+        parsed_output = json.loads(result.content)
+        validated_data = EnrichedReceipt(**parsed_output)
+        return json.dumps(validated_data.dict())
+    except json.JSONDecodeError:
+        return "Error: The output is not valid JSON."
+    except ValidationError as e:
+        return f"Validation error: {e}"
