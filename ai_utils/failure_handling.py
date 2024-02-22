@@ -20,11 +20,11 @@ def retry_function(func, arg, max_attempts=3):
     for attempt in range(max_attempts):
         try:
             result = func(arg)
-            cleaned_result = clean_json_string(result)  # Clean the result
+            cleaned_result = clean_json_string(result)
             if is_valid_json(cleaned_result):
-                return cleaned_result  # Return the cleaned result
+                return cleaned_result
             else:
-                raise ValueError("Invalid JSON returned")
+                return result
         except (ValueError, json.JSONDecodeError) as e:
             if attempt == max_attempts - 1:
                 raise

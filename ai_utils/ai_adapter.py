@@ -33,7 +33,12 @@ class EnrichedReceiptItem(BaseModel):
 class EnrichedReceipt(BaseModel):
     receiptItems: List[EnrichedReceiptItem] = Field(description="List of receipt items with nutritional values")
 
-
+class SuggestionItem(BaseModel):
+    prevItem: str = Field(description="Name of the previous item")
+    prevItemPrice: float = Field(description="Price of the previous item")
+    newItem: str = Field(description="Name of the new item")
+    newItemPrice: float = Field(description="Price of the new item")
+    description: str = Field(description="One sentence explanation of the suggestion")
 
 def process_image(img):
     vision_model = ChatGoogleGenerativeAI(model="gemini-pro-vision", stream=True, convert_system_message_to_human=True)
@@ -98,8 +103,28 @@ def add_nutritional_data(data_raw_json: str) -> str:
     try:
         parsed_output = json.loads(result.content)
         validated_data = EnrichedReceipt(**parsed_output)
-        return json.dumps(validated_data.dict())
+        return validated_data.model_dump_json()
     except json.JSONDecodeError:
-        return "Error: The output is not valid JSON."
+        return "Error: The output is not valid JSON." + result.content
     except ValidationError as e:
         return f"Validation error: {e}"
+    
+
+def get_suggestions(items: str) -> str:
+    text_model = ChatGoogleGenerativeAI(model="gemini-pro", convert_system_message_to_human=True)
+
+    parser = PydanticOutputParser(pydantic_object=SuggestionItem)
+
+    prompt = PromptTemplate(
+        template="Suggest a healthier alternative in the same price range.\n{format_instructions}\n{query}\n",
+        input_variables=["query"],
+        partial_variables={"format_instructions": parser.get_format_instructions()},
+    )
+
+    chain = prompt | text_model | parser
+
+    try:
+        validated_data = chain.invoke({"query": items})
+        return json.dumps(validated_data.dict())
+    except Exception as e:
+        return f"Error: {e}"
