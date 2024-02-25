@@ -2,6 +2,8 @@
 # NouriLens Backend
 by Merve, David, David, and Tayfun for the Google Developer Student Clubs Solution Challenge 2024.
 
+Access NouriLens [here](https://nourilens.web.app/)
+
 ## Overview
 We designed NouriLens to tackle malnutrition by making healthier eating habits accessible and affordable, particularly for lower-income families. By leveraging Gemini Pro to extract and enrich information from grocery receipts, it simplifies nutritional tracking and offers personalized, budget-friendly dietary suggestions. Our long-term goal is to facilitate gradual changes in eating habits, challenging the misconception that healthy eating is inherently costly, and ultimately reducing the health inequality gap.
 
