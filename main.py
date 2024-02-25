@@ -3,10 +3,11 @@ from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from io import BytesIO
 from PIL import Image
-from ai_utils.ai_adapter import process_image, filter_list, create_raw_json, add_nutritional_data, get_suggestions
+from ai_utils.ai_adapter import process_image, process_url, filter_list, create_raw_json, add_nutritional_data, get_suggestions
 from ai_utils.failure_handling import retry_function
 from typing import List
 from pydantic import BaseModel
+from datetime import datetime
 
 
 class Item(BaseModel):
@@ -29,6 +30,8 @@ class SuggestionItem(BaseModel):
 class SuggestionsRequest(BaseModel):
     items_string: str
 
+class ImageURL(BaseModel):
+    url: str
 
 app = FastAPI()
 
@@ -77,6 +80,20 @@ async def upload_image(file: UploadFile = File(...)):
 
     return output_json['receiptItems']
 
+
+@app.post("/upload_url", response_model=List[Item])
+async def upload_url(image_url: ImageURL):
+    url = image_url.url
+    processed_image_output = process_url(url)
+
+    # Filter, convert to JSON, and enrich the data
+    filtered_list = filter_list(processed_image_output)
+    raw_json = retry_function(create_raw_json, filtered_list)
+    enriched_json = retry_function(add_nutritional_data, raw_json)
+
+    output_json = json.loads(enriched_json)
+
+    return output_json['receiptItems']
 
 @app.post("/suggestions", response_model=SuggestionItem)
 async def healthy_alternatives(request_body: SuggestionsRequest):
